@@ -7,6 +7,7 @@ provides typed helpers for every major Orchestrator endpoint.
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Dict, List, Type, TypeVar
 from urllib.parse import urlparse
@@ -168,6 +169,19 @@ class Orchestrator:
         data = await self._call("GET", path, params=params, folder_id=folder_id)
         return [model(**item) for item in data.get("value", [])]
 
+    async def _count(self, path: str, *, flt: str | None = None, folder_id: int | None = None) -> int:
+        """Return the ``@odata.count`` for a collection (optionally filtered)."""
+        params: Dict[str, Any] = {"$top": 0, "$count": "true"}
+        if flt:
+            params["$filter"] = flt
+        data = await self._call("GET", path, params=params, folder_id=folder_id)
+        return data.get("@odata.count", 0)
+
+    @staticmethod
+    def _odata_str(value: str) -> str:
+        """Escape a string literal for safe interpolation into an OData $filter."""
+        return value.replace("'", "''")
+
     # ── Folders ─────────────────────────────────────────────
 
     async def list_folders(self, *, limit: int = 50, skip: int = 0) -> List[Folder]:
@@ -202,7 +216,7 @@ class Orchestrator:
         )
 
     async def get_robot_asset(self, robot_id: int, asset_name: str) -> Any:
-        path = f"/odata/Assets/UiPath.Server.Configuration.OData.GetRobotAssetByRobotId(robotId={robot_id},assetName='{asset_name}')"
+        path = f"/odata/Assets/UiPath.Server.Configuration.OData.GetRobotAssetByRobotId(robotId={robot_id},assetName='{self._odata_str(asset_name)}')"
         return await self._call("GET", path)
 
     # ── Queues ──────────────────────────────────────────────
@@ -242,7 +256,7 @@ class Orchestrator:
         if queue_id:
             filters.append(f"QueueDefinitionId eq {queue_id}")
         if status:
-            filters.append(f"Status eq '{status}'")
+            filters.append(f"Status eq '{self._odata_str(status)}'")
 
         params: Dict[str, Any] = {"$top": limit, "$skip": skip, "$orderby": "CreationTime desc", "$count": "true"}
         if filters:
@@ -253,21 +267,21 @@ class Orchestrator:
 
     async def compute_queue_metrics(self, queue_name: str, *, folder_id: int | None = None) -> QueueMetrics:
         defs = await self._call(
-            "GET", "/odata/QueueDefinitions", params={"$filter": f"Name eq '{queue_name}'"}, folder_id=folder_id
+            "GET", "/odata/QueueDefinitions",
+            params={"$filter": f"Name eq '{self._odata_str(queue_name)}'"}, folder_id=folder_id,
         )
         if not defs.get("value"):
             raise ValueError(f"Queue '{queue_name}' not found")
         qid = defs["value"][0]["Id"]
 
-        buckets = {}
-        for label in ("New", "InProgress", "Successful", "Failed", "Abandoned"):
-            r = await self._call(
-                "GET",
+        buckets = {
+            label: await self._count(
                 "/odata/QueueItems",
-                params={"$top": 0, "$count": "true", "$filter": f"QueueDefinitionId eq {qid} and Status eq '{label}'"},
+                flt=f"QueueDefinitionId eq {qid} and Status eq '{label}'",
                 folder_id=folder_id,
             )
-            buckets[label] = r.get("@odata.count", 0)
+            for label in ("New", "InProgress", "Successful", "Failed", "Abandoned")
+        }
 
         done = buckets["Successful"] + buckets["Failed"]
         return QueueMetrics(
@@ -294,9 +308,9 @@ class Orchestrator:
     ) -> List[Job]:
         filters: list[str] = []
         if state:
-            filters.append(f"State eq '{state}'")
+            filters.append(f"State eq '{self._odata_str(state)}'")
         if release_name:
-            filters.append(f"ReleaseName eq '{release_name}'")
+            filters.append(f"ReleaseName eq '{self._odata_str(release_name)}'")
         params: Dict[str, Any] = {"$top": limit, "$orderby": "CreationTime desc"}
         if filters:
             params["$filter"] = " and ".join(filters)
@@ -318,7 +332,7 @@ class Orchestrator:
                 "ReleaseKey": release_key,
                 "Strategy": "JobsCount",
                 "JobsCount": count,
-                "InputArguments": str(input_args) if input_args else None,
+                "InputArguments": json.dumps(input_args) if input_args else None,
             }
         }
         return await self._call("POST", "/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs", body=payload, folder_id=folder_id)
@@ -333,15 +347,10 @@ class Orchestrator:
         )
 
     async def compute_job_metrics(self, *, folder_id: int | None = None) -> JobMetrics:
-        counts: Dict[str, int] = {}
-        for state in ("Pending", "Running", "Successful", "Faulted", "Stopped"):
-            r = await self._call(
-                "GET",
-                "/odata/Jobs",
-                params={"$top": 0, "$count": "true", "$filter": f"State eq '{state}'"},
-                folder_id=folder_id,
-            )
-            counts[state] = r.get("@odata.count", 0)
+        counts = {
+            state: await self._count("/odata/Jobs", flt=f"State eq '{state}'", folder_id=folder_id)
+            for state in ("Pending", "Running", "Successful", "Faulted", "Stopped")
+        }
 
         done = counts["Successful"] + counts["Faulted"]
         return JobMetrics(
@@ -359,7 +368,7 @@ class Orchestrator:
     async def list_releases(self, *, folder_id: int | None = None, process_key: str | None = None) -> List[Release]:
         params: Dict[str, Any] = {}
         if process_key:
-            params["$filter"] = f"ProcessKey eq '{process_key}'"
+            params["$filter"] = f"ProcessKey eq '{self._odata_str(process_key)}'"
         return await self._odata_list("/odata/Releases", Release, params=params, folder_id=folder_id)
 
     # ── Sessions ────────────────────────────────────────────
@@ -387,9 +396,9 @@ class Orchestrator:
     ) -> Dict[str, Any]:
         filters: list[str] = []
         if job_key:
-            filters.append(f"JobKey eq '{job_key}'")
+            filters.append(f"JobKey eq '{self._odata_str(job_key)}'")
         if level:
-            filters.append(f"Level eq '{level}'")
+            filters.append(f"Level eq '{self._odata_str(level)}'")
         if since:
             filters.append(f"TimeStamp ge {since}")
         if until:
@@ -415,11 +424,11 @@ class Orchestrator:
     ) -> List[AuditLog]:
         filters: list[str] = []
         if action:
-            filters.append(f"Action eq '{action}'")
+            filters.append(f"Action eq '{self._odata_str(action)}'")
         if user:
-            filters.append(f"UserName eq '{user}'")
+            filters.append(f"UserName eq '{self._odata_str(user)}'")
         if component:
-            filters.append(f"Component eq '{component}'")
+            filters.append(f"Component eq '{self._odata_str(component)}'")
         params: Dict[str, Any] = {"$top": limit, "$skip": skip, "$orderby": "ExecutionTime desc"}
         if filters:
             params["$filter"] = " and ".join(filters)
@@ -431,14 +440,11 @@ class Orchestrator:
         return await self.query_jobs(folder_id=folder_id, state="Faulted", limit=limit)
 
     async def summarize_folder(self, folder_id: int) -> FolderSummary:
-        robots_r = await self._call(
-            "GET",
-            f"/odata/Robots/UiPath.Server.Configuration.OData.GetRobotsFromFolder(folderId={folder_id})",
-            params={"$top": 0, "$count": "true"},
+        robots_n = await self._count(
+            f"/odata/Robots/UiPath.Server.Configuration.OData.GetRobotsFromFolder(folderId={folder_id})"
         )
-        queues_r = await self._call(
-            "GET", "/odata/QueueDefinitions", params={"$top": 0, "$count": "true"}, folder_id=folder_id
-        )
+        queues_n = await self._count("/odata/QueueDefinitions", folder_id=folder_id)
+        releases_n = await self._count("/odata/Releases", folder_id=folder_id)
         jm = await self.compute_job_metrics(folder_id=folder_id)
         folder_r = await self._call("GET", f"/odata/Folders({folder_id})")
 
@@ -453,9 +459,9 @@ class Orchestrator:
                 "Stopped": jm.stopped,
             },
             total_jobs=jm.total,
-            queues=queues_r.get("@odata.count", 0),
-            releases=0,
-            robots=robots_r.get("@odata.count", 0),
+            queues=queues_n,
+            releases=releases_n,
+            robots=robots_n,
         )
 
     async def get_dashboard(self, *, folder_id: int | None = None) -> Dict[str, Any]:
@@ -472,8 +478,12 @@ class Orchestrator:
         return {"process": process_name, "success_rate_pct": rate, "analyzed": len(jobs), "successful": len(ok)}
 
     async def count_entities(self) -> Dict[str, int]:
-        releases = await self.list_releases()
-        return {"processes": len(releases), "assets": 0, "queues": 0, "schedules": 0}
+        return {
+            "processes": await self._count("/odata/Releases"),
+            "assets": await self._count("/odata/Assets"),
+            "queues": await self._count("/odata/QueueDefinitions"),
+            "schedules": await self._count("/odata/ProcessSchedules"),
+        }
 
     async def aggregate_session_states(self) -> Dict[str, int]:
         sessions = await self.list_sessions(limit=500)

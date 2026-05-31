@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `start_process`/`launch_process` now serialize `input_arguments` as JSON
+  (`json.dumps`) instead of a Python `str()` repr, which produced invalid JSON
+  and broke process starts that passed input arguments.
+- Escape single quotes in all OData `$filter` string literals (process/queue/
+  asset names, log and audit filters) to prevent broken or injected queries.
+- `count_entities` now returns real counts for assets, queues, and schedules
+  (previously hardcoded to `0`).
+- `summarize_folder` now populates the `releases` count (previously always `0`).
+- Resource endpoints return clean, indented JSON instead of a Python list repr.
+
 ### Changed
 - Relicensed from a proprietary license to **MIT** to allow adoption.
 - Rewrote the README around the five questions a first-time user needs answered:

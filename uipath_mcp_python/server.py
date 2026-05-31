@@ -8,6 +8,8 @@ allowing AI assistants to manage automations, queues, robots and more.
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
+import json
+
 from mcp.server.fastmcp import FastMCP
 
 from .settings import build_settings
@@ -190,10 +192,14 @@ async def query_robot_logs(
     folder_id: Optional[int] = None,
     job_key: Optional[str] = None,
     level: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
     limit: int = 100,
 ) -> Dict[str, Any]:
-    """Retrieve robot execution logs with optional filtering."""
-    result = await client.query_robot_logs(folder_id=folder_id, job_key=job_key, level=level, limit=limit)
+    """Retrieve robot execution logs with optional filtering (time range via since/until, ISO-8601)."""
+    result = await client.query_robot_logs(
+        folder_id=folder_id, job_key=job_key, level=level, since=since, until=until, limit=limit
+    )
     return {"entries": [e.model_dump() for e in result["entries"]], "total": result["total"]}
 
 
@@ -280,54 +286,59 @@ async def get_named_user_licenses(robot_type: str) -> Dict[str, Any]:
 #  RESOURCES — read-only data endpoints
 # ════════════════════════════════════════════════════════════
 
+def _json(data: Any) -> str:
+    """Serialize a resource payload as clean, indented JSON text."""
+    return json.dumps(data, indent=2, default=str)
+
+
 @mcp.resource("orchestrator://folders")
 async def res_folders() -> str:
     folders = await client.list_folders(limit=100)
-    return str([f.model_dump_json() for f in folders])
+    return _json([f.model_dump(mode="json") for f in folders])
 
 @mcp.resource("orchestrator://robots")
 async def res_robots() -> str:
     robots = await client.list_robots(limit=100)
-    return str([r.model_dump_json() for r in robots])
+    return _json([r.model_dump(mode="json") for r in robots])
 
 @mcp.resource("orchestrator://machines")
 async def res_machines() -> str:
     machines = await client.list_machines(limit=100)
-    return str([m.model_dump_json() for m in machines])
+    return _json([m.model_dump(mode="json") for m in machines])
 
 @mcp.resource("orchestrator://queues")
 async def res_queues() -> str:
     queues = await client.list_queues()
-    return str([q.model_dump_json() for q in queues])
+    return _json([q.model_dump(mode="json") for q in queues])
 
 @mcp.resource("orchestrator://jobs/recent")
 async def res_recent_jobs() -> str:
     jobs = await client.query_jobs(limit=20)
-    return str([j.model_dump_json() for j in jobs])
+    return _json([j.model_dump(mode="json") for j in jobs])
 
 @mcp.resource("orchestrator://releases")
 async def res_releases() -> str:
     releases = await client.list_releases()
-    return str([r.model_dump_json() for r in releases])
+    return _json([r.model_dump(mode="json") for r in releases])
 
 @mcp.resource("orchestrator://dashboard")
 async def res_dashboard() -> str:
-    return str(await client.get_dashboard())
+    return _json(await client.get_dashboard())
 
 @mcp.resource("orchestrator://sessions")
 async def res_sessions() -> str:
     sessions = await client.list_sessions(limit=100)
-    return str([s.model_dump_json() for s in sessions])
+    return _json([s.model_dump(mode="json") for s in sessions])
 
 @mcp.resource("orchestrator://assets")
 async def res_assets() -> str:
     assets = await client.list_assets(limit=100)
-    return str([a.model_dump_json() for a in assets])
+    return _json([a.model_dump(mode="json") for a in assets])
 
 @mcp.resource("orchestrator://schedules")
 async def res_schedules() -> str:
     schedules = await client.list_schedules(limit=100)
-    return str([s.model_dump_json() for s in schedules])
+    return _json([s.model_dump(mode="json") for s in schedules])
 
 
 # ── entry point ─────────────────────────────────────────────

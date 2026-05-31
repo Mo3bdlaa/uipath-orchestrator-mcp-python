@@ -5,6 +5,7 @@ tests never reach a live Orchestrator.
 """
 
 import time
+import json
 from unittest.mock import AsyncMock
 
 from uipath_mcp_python.schemas import Job, Session
@@ -182,3 +183,72 @@ async def test_license_stubs_report_not_implemented(make_client):
     client = make_client()
     assert await client.get_license_stats() == {"status": "not_implemented"}
     assert await client.get_runtime_licenses(robot_type="Unattended") == {"status": "not_implemented"}
+
+
+# ── Bug fixes / hardening ────────────────────────────────────
+
+async def test_launch_process_serializes_input_arguments_as_json(make_client):
+    client = make_client()
+    client._call = AsyncMock(return_value={})
+
+    await client.launch_process("release-key", input_args={"a": 1, "b": "x"})
+
+    raw = client._call.call_args.kwargs["body"]["startInfo"]["InputArguments"]
+    # Must be valid JSON, not a Python dict repr with single quotes.
+    assert json.loads(raw) == {"a": 1, "b": "x"}
+
+
+async def test_launch_process_omits_input_arguments_when_none(make_client):
+    client = make_client()
+    client._call = AsyncMock(return_value={})
+
+    await client.launch_process("release-key")
+
+    assert client._call.call_args.kwargs["body"]["startInfo"]["InputArguments"] is None
+
+
+async def test_query_jobs_escapes_single_quotes(make_client):
+    client = make_client()
+    client._call = AsyncMock(return_value={"value": []})
+
+    await client.query_jobs(release_name="O'Brien")
+
+    assert client._call.call_args.kwargs["params"]["$filter"] == "ReleaseName eq 'O''Brien'"
+
+
+async def test_count_entities_counts_each_collection(make_client):
+    client = make_client()
+    sizes = {
+        "/odata/Releases": 5, "/odata/Assets": 3,
+        "/odata/QueueDefinitions": 7, "/odata/ProcessSchedules": 2,
+    }
+    client._call = AsyncMock(side_effect=lambda m, path, **k: {"@odata.count": sizes[path]})
+
+    assert await client.count_entities() == {
+        "processes": 5, "assets": 3, "queues": 7, "schedules": 2,
+    }
+
+
+async def test_summarize_folder_populates_releases(make_client):
+    client = make_client()
+
+    def fake_call(method, path, *, params=None, body=None, folder_id=None):
+        if "GetRobotsFromFolder" in path:
+            return {"@odata.count": 4}
+        if path == "/odata/QueueDefinitions":
+            return {"@odata.count": 6}
+        if path == "/odata/Releases":
+            return {"@odata.count": 9}
+        if path.startswith("/odata/Jobs"):
+            return {"@odata.count": 0}
+        if path.startswith("/odata/Folders"):
+            return {"DisplayName": "Production"}
+        return {}
+
+    client._call = AsyncMock(side_effect=fake_call)
+
+    summary = await client.summarize_folder(3)
+    assert summary.releases == 9  # was hardcoded 0 before the fix
+    assert summary.robots == 4
+    assert summary.queues == 6
+    assert summary.folder_name == "Production"
