@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uipath-orchestrator-mcp"
+version = "0.1.0"
+description = "Python MCP server for UiPath Orchestrator — typed async client with multi-auth (Cloud OAuth · On-prem · PAT)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Mohamed Shaker", email = "3bdlaa.20@gmail.com" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "uipath",
+    "uipath-orchestrator",
+    "rpa",
+    "anthropic",
+    "claude",
+    "agentic-ai",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+uipath-mcp = "uipath_mcp_python.server:main"
+
+[project.urls]
+Homepage = "https://mohammedshaker.com"
+Repository = "https://github.com/Mo3bdlaa/uipath-orchestrator-mcp-python"
+
+[tool.setuptools]
+packages = ["uipath_mcp_python"]
