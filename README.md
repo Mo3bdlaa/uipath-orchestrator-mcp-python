@@ -194,6 +194,14 @@ uipath_mcp_python/
 See [`examples/`](./examples) for worked agent interactions, including a multi-step
 list-then-schedule flow and an on-prem deployment.
 
+## Development
+
+```bash
+pip install -e ".[test]"
+pytest          # unit tests — no live Orchestrator required
+ruff check uipath_mcp_python/ tests/
+```
+
 ## License
 
 [MIT](./LICENSE) — free to use, modify, and distribute.

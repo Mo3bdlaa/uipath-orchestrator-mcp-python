@@ -19,7 +19,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   script, and project URLs — the repo is now `pip install`-able.
 - `examples/` with worked agent interactions (on-prem deploy, multi-step
   list-then-schedule, and a cross-domain query).
-- `.github/workflows/ci.yml` running ruff across Python 3.10–3.12.
+- `tests/` — unit tests for settings validation, Pydantic schemas, URL
+  resolution, token caching, and computed metrics (no live Orchestrator needed).
+- `.github/workflows/ci.yml` running ruff and pytest across Python 3.10–3.12.
 - `.github/MAINTAINER_TODO.md` listing the manual GitHub UI settings (topics,
   description, website).
 - `CHANGELOG.md` (this file).
