@@ -188,7 +188,16 @@ class Orchestrator:
             if fid is not None:
                 headers["X-UIPATH-OrganizationUnitId"] = str(fid)
 
-            resp = await self._http.request(method, url, headers=headers, params=params, json=body)
+            try:
+                resp = await self._http.request(method, url, headers=headers, params=params, json=body)
+            except httpx.TransportError as exc:
+                # Connection reset, read/connect timeout, DNS failure, etc. — transient.
+                if attempt < max_retries:
+                    await asyncio.sleep(2 ** attempt + random.uniform(0, 0.5))
+                    attempt += 1
+                    continue
+                raise OrchestratorError(method, path, 0, f"transport error: {exc}") from exc
+
             if resp.is_success:
                 return resp.json()
 

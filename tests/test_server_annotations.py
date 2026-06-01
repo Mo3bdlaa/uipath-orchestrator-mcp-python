@@ -58,3 +58,27 @@ async def test_parameterised_resource_templates_registered():
     uris = {t.uriTemplate for t in templates}
     assert "orchestrator://folders/{folder_id}/summary" in uris
     assert "orchestrator://queues/{queue_name}/metrics" in uris
+
+
+def test_every_tool_delegates_to_a_real_client_method():
+    """Static guard: every ``client.<x>(...)`` in server.py must exist on Orchestrator.
+
+    Catches drift between the tool layer and the client (typos, removed methods).
+    """
+    import ast
+    import inspect
+
+    from uipath_mcp_python.orchestrator import Orchestrator
+
+    source = inspect.getsource(server)
+    referenced = {
+        node.func.attr
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "client"
+    }
+    assert referenced, "expected server.py to call client methods"
+    missing = [name for name in referenced if not hasattr(Orchestrator, name)]
+    assert not missing, f"server.py calls client methods that do not exist: {missing}"

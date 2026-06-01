@@ -225,6 +225,34 @@ async def test_call_raises_after_exhausting_retries(make_client, monkeypatch):
         await client._call("GET", "/odata/Jobs", max_retries=2)
 
 
+async def test_call_retries_on_transport_error_then_succeeds(make_client, monkeypatch):
+    import httpx as _httpx
+
+    client = make_client(auth_strategy="cloud-pat", access_token="t", client_id=None, client_secret=None)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    client._http.request = AsyncMock(side_effect=[
+        _httpx.ConnectError("boom"),                       # transient transport failure
+        _resp(200, json_body={"ok": True}),
+    ])
+
+    assert await client._call("GET", "/odata/Jobs") == {"ok": True}
+    assert client._http.request.await_count == 2
+
+
+async def test_call_raises_typed_error_when_transport_keeps_failing(make_client, monkeypatch):
+    import httpx as _httpx
+    from uipath_mcp_python.orchestrator import OrchestratorError
+
+    client = make_client(auth_strategy="cloud-pat", access_token="t", client_id=None, client_secret=None)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    client._http.request = AsyncMock(side_effect=_httpx.ReadTimeout("slow"))
+
+    with pytest.raises(OrchestratorError) as exc:
+        await client._call("GET", "/odata/Jobs", max_retries=2)
+    assert exc.value.status_code == 0
+    assert "transport error" in str(exc.value)
+
+
 async def test_orchestrator_error_carries_status_and_trims_body(make_client):
     from uipath_mcp_python.orchestrator import OrchestratorError, _MAX_ERROR_BODY
 

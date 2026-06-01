@@ -191,8 +191,9 @@ The client is built for unattended agent use:
 - **Token refresh** is serialised behind a lock and reused with a 5-minute
   buffer, so concurrent tool calls trigger a single handshake. A `401` triggers
   one transparent refresh-and-retry.
-- **Transient failures** (`429`, `5xx`) are retried with exponential backoff and
-  jitter, honouring the `Retry-After` header when present.
+- **Transient failures** — both HTTP `429`/`5xx` responses and transport-level
+  errors (connection resets, read/connect timeouts) — are retried with
+  exponential backoff and jitter, honouring the `Retry-After` header when present.
 - **Timeouts and a bounded connection pool** are configured on the HTTP client;
   error bodies are trimmed before surfacing as a typed `OrchestratorError`.
 

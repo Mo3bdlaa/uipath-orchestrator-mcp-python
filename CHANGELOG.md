@@ -27,8 +27,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `get_named_user_licenses`). They returned `{"status": "not_implemented"}` and
   only added noise to the agent's tool surface. Tool count: 29 → 25.
 - **Resilience:** the HTTP layer now refreshes the token once on `401` and
-  retries transient failures (`429`/`5xx`) with exponential backoff plus jitter,
-  honouring `Retry-After` when present.
+  retries transient failures — HTTP `429`/`5xx` *and* transport-level errors
+  (connection resets, read/connect timeouts) — with exponential backoff plus
+  jitter, honouring `Retry-After` when present.
 - **Transport hardening:** explicit request timeout and a bounded connection
   pool (tunable via `UIPATH_REQUEST_TIMEOUT` / `UIPATH_MAX_CONNECTIONS`), token
   refresh serialised behind a lock so concurrent tool calls trigger a single
