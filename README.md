@@ -3,8 +3,10 @@
 > Python MCP server for UiPath Orchestrator — drive your automations from Claude Desktop and any MCP-aware agent.
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![MCP](https://img.shields.io/badge/MCP-1.x-6E56CF)
+![MCP](https://img.shields.io/badge/MCP-1.8%2B-6E56CF)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
+![Typed](https://img.shields.io/badge/typed-mypy--clean-2EA043)
+[![CI](https://github.com/Mo3bdlaa/uipath-orchestrator-mcp-python/actions/workflows/ci.yml/badge.svg)](https://github.com/Mo3bdlaa/uipath-orchestrator-mcp-python/actions/workflows/ci.yml)
 
 ## What is this?
 
@@ -154,7 +156,7 @@ The server exposes **25 tools**, grouped by Orchestrator domain:
 | `summarize_folder` | Build a health snapshot of a folder: job states, queue/robot counts. |
 | `get_dashboard` | High-level dashboard with aggregated metrics. |
 
-> The tool list above is generated from the docstrings in
+> The descriptions above mirror the tool docstrings in
 > [`uipath_mcp_python/server.py`](./uipath_mcp_python/server.py) — that file is the
 > source of truth as tools change.
 >
