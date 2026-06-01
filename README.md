@@ -162,6 +162,16 @@ The server exposes **25 tools**, grouped by Orchestrator domain:
 > agent host can tell safe reads from state changes. Only `start_process`,
 > `enqueue_item`, and `cancel_job` mutate Orchestrator state.
 
+**Uniform list responses.** Every list/query tool returns the same envelope, so
+an agent never has to guess the shape:
+
+```json
+{ "items": [ /* rows */ ], "count": 2, "total": 57 }
+```
+
+`count` is the size of the returned page; `total` is the server-side total when
+the OData endpoint reports one (otherwise `null`).
+
 ## Resources (read-only endpoints)
 
 | URI | Description |

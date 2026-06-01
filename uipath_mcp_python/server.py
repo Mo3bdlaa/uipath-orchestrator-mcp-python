@@ -6,7 +6,7 @@ allowing AI assistants to manage automations, queues, robots and more.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import json
 
@@ -37,6 +37,16 @@ def _writes(*, destructive: bool, idempotent: bool) -> ToolAnnotations:
     )
 
 
+def _page(items: Any, *, total: Optional[int] = None) -> Dict[str, Any]:
+    """Uniform collection envelope shared by every list/query tool.
+
+    ``items`` is the page of rows, ``count`` its length, and ``total`` the
+    server-side total when the API reports one (otherwise ``None``).
+    """
+    rows = [i.model_dump(mode="json") if hasattr(i, "model_dump") else i for i in items]
+    return {"items": rows, "count": len(rows), "total": total}
+
+
 # ════════════════════════════════════════════════════════════
 #  TOOLS — organised by domain
 # ════════════════════════════════════════════════════════════
@@ -48,7 +58,7 @@ def _writes(*, destructive: bool, idempotent: bool) -> ToolAnnotations:
 async def list_folders(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return Orchestrator folders (organizational units) with pagination."""
     folders = await client.list_folders(limit=limit, skip=skip)
-    return {"folders": [f.model_dump() for f in folders], "count": len(folders)}
+    return _page(folders)
 
 
 # ── Robots & Machines ───────────────────────────────────────
@@ -57,23 +67,23 @@ async def list_folders(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
 async def list_robots(folder_id: Optional[int] = None, limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return robots registered in the Orchestrator, optionally scoped to a folder."""
     robots = await client.list_robots(folder_id=folder_id, limit=limit, skip=skip)
-    return {"robots": [r.model_dump() for r in robots], "count": len(robots)}
+    return _page(robots)
 
 
 @mcp.tool(annotations=READ_ONLY)
 async def list_machines(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return host machines known to the Orchestrator."""
     machines = await client.list_machines(limit=limit, skip=skip)
-    return {"machines": [m.model_dump() for m in machines], "count": len(machines)}
+    return _page(machines)
 
 
 # ── Assets ──────────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_assets(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+async def list_assets(folder_id: Optional[int] = None, limit: int = 50) -> Dict[str, Any]:
     """List assets (credentials, config values) stored in a folder."""
     assets = await client.list_assets(folder_id=folder_id, limit=limit)
-    return [a.model_dump() for a in assets]
+    return _page(assets)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -85,10 +95,10 @@ async def get_robot_asset(robot_id: int, asset_name: str) -> Dict[str, Any]:
 # ── Queues ──────────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_queues(folder_id: Optional[int] = None) -> List[Dict[str, Any]]:
+async def list_queues(folder_id: Optional[int] = None) -> Dict[str, Any]:
     """List every queue definition in the Orchestrator."""
     queues = await client.list_queues(folder_id=folder_id)
-    return [q.model_dump() for q in queues]
+    return _page(queues)
 
 
 @mcp.tool(annotations=_writes(destructive=False, idempotent=False))
@@ -115,7 +125,7 @@ async def query_queue_items(
 ) -> Dict[str, Any]:
     """Search queue items with optional filters on queue ID and status."""
     result = await client.query_queue_items(queue_id=queue_id, status=status, folder_id=folder_id, limit=limit, skip=skip)
-    return {"items": [i.model_dump() for i in result["items"]], "total": result["total"]}
+    return _page(result["items"], total=result["total"])
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -133,10 +143,10 @@ async def query_jobs(
     state: Optional[str] = None,
     release_name: Optional[str] = None,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Search for jobs with optional state and process name filters."""
     jobs = await client.query_jobs(folder_id=folder_id, state=state, release_name=release_name, limit=limit)
-    return [j.model_dump() for j in jobs]
+    return _page(jobs)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -177,28 +187,28 @@ async def get_job_metrics(folder_id: Optional[int] = None) -> Dict[str, Any]:
 # ── Releases ────────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_releases(folder_id: Optional[int] = None, process_key: Optional[str] = None) -> List[Dict[str, Any]]:
+async def list_releases(folder_id: Optional[int] = None, process_key: Optional[str] = None) -> Dict[str, Any]:
     """List published process releases, optionally filtered by key."""
     releases = await client.list_releases(folder_id=folder_id, process_key=process_key)
-    return [r.model_dump() for r in releases]
+    return _page(releases)
 
 
 # ── Sessions ────────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_sessions(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+async def list_sessions(folder_id: Optional[int] = None, limit: int = 50) -> Dict[str, Any]:
     """List active robot sessions — shows which machines are connected and their state."""
     sessions = await client.list_sessions(folder_id=folder_id, limit=limit)
-    return [s.model_dump() for s in sessions]
+    return _page(sessions)
 
 
 # ── Schedules ───────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def list_schedules(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+async def list_schedules(folder_id: Optional[int] = None, limit: int = 50) -> Dict[str, Any]:
     """List scheduled triggers (cron expressions, next run times)."""
     schedules = await client.list_schedules(folder_id=folder_id, limit=limit)
-    return [s.model_dump() for s in schedules]
+    return _page(schedules)
 
 
 # ── Logs ────────────────────────────────────────────────────
@@ -216,7 +226,7 @@ async def query_robot_logs(
     result = await client.query_robot_logs(
         folder_id=folder_id, job_key=job_key, level=level, since=since, until=until, limit=limit
     )
-    return {"entries": [e.model_dump() for e in result["entries"]], "total": result["total"]}
+    return _page(result["entries"], total=result["total"])
 
 
 # ── Audit ───────────────────────────────────────────────────
@@ -228,19 +238,19 @@ async def query_audit_trail(
     component: Optional[str] = None,
     limit: int = 50,
     skip: int = 0,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Search the audit trail — who changed what and when."""
     logs = await client.query_audit_trail(action=action, user=user, component=component, limit=limit, skip=skip)
-    return [entry.model_dump() for entry in logs]
+    return _page(logs)
 
 
 # ── Analytics ───────────────────────────────────────────────
 
 @mcp.tool(annotations=READ_ONLY)
-async def get_faulted_jobs(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
+async def get_faulted_jobs(folder_id: Optional[int] = None, limit: int = 50) -> Dict[str, Any]:
     """Fetch recent faulted jobs for failure analysis."""
     jobs = await client.get_faulted_jobs(folder_id=folder_id, limit=limit)
-    return [j.model_dump() for j in jobs]
+    return _page(jobs)
 
 
 @mcp.tool(annotations=READ_ONLY)

@@ -18,6 +18,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resource endpoints return clean, indented JSON instead of a Python list repr.
 
 ### Changed
+- **Uniform list responses:** every list/query tool now returns the same
+  `{"items": [...], "count": N, "total": <server total or null>}` envelope.
+  Previously responses were inconsistent — bare arrays, `{"folders": [...],
+  "count": N}`, and `{"entries": [...], "total": N}` all coexisted, forcing an
+  agent to special-case each tool. **This changes the output shape of the
+  list/query tools.**
 - **Agent safety:** every tool now carries MCP annotations (`readOnlyHint` /
   `destructiveHint` / `idempotentHint`) so a host can distinguish safe reads
   from state changes. Only `start_process`, `enqueue_item`, and `cancel_job`

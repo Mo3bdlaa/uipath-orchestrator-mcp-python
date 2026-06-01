@@ -14,8 +14,6 @@ os.environ.setdefault("UIPATH_CLIENT_SECRET", "secret")
 from uipath_mcp_python import server  # noqa: E402
 
 WRITE_TOOLS = {"start_process", "enqueue_item", "cancel_job"}
-
-
 async def _tool_map():
     tools = await server.mcp.list_tools()
     return {t.name: t for t in tools}
@@ -58,6 +56,35 @@ async def test_parameterised_resource_templates_registered():
     uris = {t.uriTemplate for t in templates}
     assert "orchestrator://folders/{folder_id}/summary" in uris
     assert "orchestrator://queues/{queue_name}/metrics" in uris
+
+
+async def test_list_tool_returns_uniform_envelope(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from uipath_mcp_python.schemas import Job
+
+    rows = [Job(Id=1, Key="a", State="Successful"), Job(Id=2, Key="b", State="Faulted")]
+    monkeypatch.setattr(server.client, "list_folders", AsyncMock(return_value=rows))
+
+    out = await server.list_folders()
+    assert set(out) == {"items", "count", "total"}
+    assert out["count"] == 2
+    assert out["total"] is None  # no server-side total for this endpoint
+    assert isinstance(out["items"][0], dict) and out["items"][0]["Id"] == 1
+
+
+async def test_query_tool_surfaces_server_total(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from uipath_mcp_python.schemas import QueueItem
+
+    payload = {"items": [QueueItem(Id=7, QueueDefinitionId=5, Status="New")], "total": 99}
+    monkeypatch.setattr(server.client, "query_queue_items", AsyncMock(return_value=payload))
+
+    out = await server.query_queue_items()
+    assert set(out) == {"items", "count", "total"}
+    assert out["count"] == 1
+    assert out["total"] == 99  # @odata.count passed through
 
 
 def test_every_tool_delegates_to_a_real_client_method():
