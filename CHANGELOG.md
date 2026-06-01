@@ -59,7 +59,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `examples/` with worked agent interactions (on-prem deploy, multi-step
   list-then-schedule, and a cross-domain query).
 - `tests/` — unit tests for settings validation, Pydantic schemas, URL
-  resolution, token caching, and computed metrics (no live Orchestrator needed).
+  resolution, token caching, and computed metrics (no live Orchestrator needed),
+  plus end-to-end contract tests that drive the real HTTP stack through an
+  `httpx.MockTransport` (URL/header shaping, OData parsing, the retry loop, and
+  error trimming) against canned Orchestrator responses.
 - `.github/workflows/ci.yml` running ruff and pytest across Python 3.10–3.12.
 - Static type checking: a `[tool.mypy]` config (the CI mypy step activates
   automatically once it is present) and a PEP 561 `py.typed` marker so the
