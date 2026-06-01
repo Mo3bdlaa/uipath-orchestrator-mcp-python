@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import json
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 from .settings import build_settings
 from .orchestrator import Orchestrator
@@ -20,6 +21,21 @@ settings = build_settings()
 client = Orchestrator(settings)
 mcp = FastMCP("UiPath Orchestrator MCP", dependencies=["httpx", "pydantic"])
 
+# Annotation presets so hosts can distinguish safe reads from state changes.
+# Almost every tool here only reads from Orchestrator; the handful that mutate
+# state are flagged so an agent host can gate or confirm them.
+READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
+
+
+def _writes(*, destructive: bool, idempotent: bool) -> ToolAnnotations:
+    """Annotation for a tool that changes Orchestrator state."""
+    return ToolAnnotations(
+        readOnlyHint=False,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=True,
+    )
+
 
 # ════════════════════════════════════════════════════════════
 #  TOOLS — organised by domain
@@ -28,7 +44,7 @@ mcp = FastMCP("UiPath Orchestrator MCP", dependencies=["httpx", "pydantic"])
 
 # ── Folders ─────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_folders(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return Orchestrator folders (organizational units) with pagination."""
     folders = await client.list_folders(limit=limit, skip=skip)
@@ -37,14 +53,14 @@ async def list_folders(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
 
 # ── Robots & Machines ───────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_robots(folder_id: Optional[int] = None, limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return robots registered in the Orchestrator, optionally scoped to a folder."""
     robots = await client.list_robots(folder_id=folder_id, limit=limit, skip=skip)
     return {"robots": [r.model_dump() for r in robots], "count": len(robots)}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_machines(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
     """Return host machines known to the Orchestrator."""
     machines = await client.list_machines(limit=limit, skip=skip)
@@ -53,14 +69,14 @@ async def list_machines(limit: int = 50, skip: int = 0) -> Dict[str, Any]:
 
 # ── Assets ──────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_assets(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List assets (credentials, config values) stored in a folder."""
     assets = await client.list_assets(folder_id=folder_id, limit=limit)
     return [a.model_dump() for a in assets]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_robot_asset(robot_id: int, asset_name: str) -> Dict[str, Any]:
     """Retrieve a specific asset value that has been assigned to a robot."""
     return await client.get_robot_asset(robot_id, asset_name)
@@ -68,14 +84,14 @@ async def get_robot_asset(robot_id: int, asset_name: str) -> Dict[str, Any]:
 
 # ── Queues ──────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_queues(folder_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """List every queue definition in the Orchestrator."""
     queues = await client.list_queues(folder_id=folder_id)
     return [q.model_dump() for q in queues]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
 async def enqueue_item(
     queue_name: str,
     content: Dict[str, Any],
@@ -89,7 +105,7 @@ async def enqueue_item(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def query_queue_items(
     queue_id: Optional[int] = None,
     status: Optional[str] = None,
@@ -102,7 +118,7 @@ async def query_queue_items(
     return {"items": [i.model_dump() for i in result["items"]], "total": result["total"]}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_queue_metrics(queue_name: str, folder_id: Optional[int] = None) -> Dict[str, Any]:
     """Compute per-status breakdown and success rate for a queue."""
     m = await client.compute_queue_metrics(queue_name, folder_id=folder_id)
@@ -111,7 +127,7 @@ async def get_queue_metrics(queue_name: str, folder_id: Optional[int] = None) ->
 
 # ── Jobs ────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def query_jobs(
     folder_id: Optional[int] = None,
     state: Optional[str] = None,
@@ -123,13 +139,13 @@ async def query_jobs(
     return [j.model_dump() for j in jobs]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def inspect_job(job_id: int, folder_id: Optional[int] = None) -> Dict[str, Any]:
     """Retrieve full details for a single job by its numeric ID."""
     return await client.inspect_job(job_id, folder_id=folder_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=False, idempotent=False))
 async def start_process(
     process_name: str,
     folder_id: Optional[int] = None,
@@ -144,14 +160,14 @@ async def start_process(
     return await client.launch_process(match.Key, input_args=input_arguments, count=count, folder_id=folder_id)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_writes(destructive=True, idempotent=True))
 async def cancel_job(job_id: int, folder_id: Optional[int] = None, force: bool = False) -> Dict[str, Any]:
     """Request graceful stop (or forced kill) of a running job."""
     await client.cancel_job(job_id, force=force, folder_id=folder_id)
     return {"status": "cancel_requested", "job_id": job_id, "strategy": "Kill" if force else "SoftStop"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_job_metrics(folder_id: Optional[int] = None) -> Dict[str, Any]:
     """Aggregate job counts by state and compute the overall success rate."""
     m = await client.compute_job_metrics(folder_id=folder_id)
@@ -160,7 +176,7 @@ async def get_job_metrics(folder_id: Optional[int] = None) -> Dict[str, Any]:
 
 # ── Releases ────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_releases(folder_id: Optional[int] = None, process_key: Optional[str] = None) -> List[Dict[str, Any]]:
     """List published process releases, optionally filtered by key."""
     releases = await client.list_releases(folder_id=folder_id, process_key=process_key)
@@ -169,7 +185,7 @@ async def list_releases(folder_id: Optional[int] = None, process_key: Optional[s
 
 # ── Sessions ────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_sessions(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List active robot sessions — shows which machines are connected and their state."""
     sessions = await client.list_sessions(folder_id=folder_id, limit=limit)
@@ -178,7 +194,7 @@ async def list_sessions(folder_id: Optional[int] = None, limit: int = 50) -> Lis
 
 # ── Schedules ───────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def list_schedules(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """List scheduled triggers (cron expressions, next run times)."""
     schedules = await client.list_schedules(folder_id=folder_id, limit=limit)
@@ -187,7 +203,7 @@ async def list_schedules(folder_id: Optional[int] = None, limit: int = 50) -> Li
 
 # ── Logs ────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def query_robot_logs(
     folder_id: Optional[int] = None,
     job_key: Optional[str] = None,
@@ -205,7 +221,7 @@ async def query_robot_logs(
 
 # ── Audit ───────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def query_audit_trail(
     action: Optional[str] = None,
     user: Optional[str] = None,
@@ -220,27 +236,27 @@ async def query_audit_trail(
 
 # ── Analytics ───────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_faulted_jobs(folder_id: Optional[int] = None, limit: int = 50) -> List[Dict[str, Any]]:
     """Fetch recent faulted jobs for failure analysis."""
     jobs = await client.get_faulted_jobs(folder_id=folder_id, limit=limit)
     return [j.model_dump() for j in jobs]
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def analyze_process(process_name: str, folder_id: Optional[int] = None, depth: int = 100) -> Dict[str, Any]:
     """Compute success rate and execution statistics for a process."""
     return await client.analyze_process(process_name, folder_id=folder_id, depth=depth)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def summarize_folder(folder_id: int) -> Dict[str, Any]:
     """Build a health snapshot of a folder: job states, queue/robot counts."""
     overview = await client.summarize_folder(folder_id)
     return overview.model_dump()
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def get_dashboard(folder_id: Optional[int] = None) -> Dict[str, Any]:
     """High-level dashboard with aggregated metrics."""
     return await client.get_dashboard(folder_id=folder_id)
@@ -248,38 +264,16 @@ async def get_dashboard(folder_id: Optional[int] = None) -> Dict[str, Any]:
 
 # ── Entity counts & session states ─────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def count_entities() -> Dict[str, int]:
     """Total counts of top-level entities (processes, assets, queues, schedules)."""
     return await client.count_entities()
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY)
 async def aggregate_session_states() -> Dict[str, int]:
     """Count robots grouped by connection state (Available, Busy, Disconnected …)."""
     return await client.aggregate_session_states()
-
-
-# ── Licensing (stubs) ──────────────────────────────────────
-
-@mcp.tool()
-async def get_consumption_license_stats(tenant_id: Optional[int] = None, days: Optional[int] = None) -> Dict[str, Any]:
-    return await client.get_consumption_license_stats(tenant_id=tenant_id, days=days)
-
-
-@mcp.tool()
-async def get_license_stats(tenant_id: Optional[int] = None, days: Optional[int] = None) -> Dict[str, Any]:
-    return await client.get_license_stats(tenant_id=tenant_id, days=days)
-
-
-@mcp.tool()
-async def get_runtime_licenses(robot_type: str) -> Dict[str, Any]:
-    return await client.get_runtime_licenses(robot_type=robot_type)
-
-
-@mcp.tool()
-async def get_named_user_licenses(robot_type: str) -> Dict[str, Any]:
-    return await client.get_named_user_licenses(robot_type=robot_type)
 
 
 # ════════════════════════════════════════════════════════════

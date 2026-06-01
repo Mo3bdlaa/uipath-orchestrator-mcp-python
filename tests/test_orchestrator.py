@@ -8,6 +8,8 @@ import time
 import json
 from unittest.mock import AsyncMock
 
+import pytest
+
 from uipath_mcp_python.schemas import Job, Session
 
 
@@ -68,18 +70,18 @@ async def test_cached_token_skips_handshake(make_client):
 
 async def test_compute_job_metrics_counts_and_rate(make_client):
     client = make_client()
-    counts = {"Pending": 2, "Running": 1, "Successful": 8, "Faulted": 2, "Stopped": 0}
-
-    def fake_call(method, path, *, params=None, body=None, folder_id=None):
-        flt = (params or {}).get("$filter", "")
-        for state, n in counts.items():
-            if f"State eq '{state}'" in flt:
-                return {"@odata.count": n}
-        return {"@odata.count": 0}
-
-    client._call = AsyncMock(side_effect=fake_call)
+    # Single $apply groupby round trip returns one row per state.
+    grouped = {"value": [
+        {"State": "Pending", "count": 2},
+        {"State": "Running", "count": 1},
+        {"State": "Successful", "count": 8},
+        {"State": "Faulted", "count": 2},
+    ]}
+    client._call = AsyncMock(return_value=grouped)
 
     m = await client.compute_job_metrics()
+    assert client._call.call_count == 1  # not five separate counts
+    assert "groupby((State)" in client._call.call_args.kwargs["params"]["$apply"]
     assert m.total == 13
     assert m.successful == 8
     assert m.faulted == 2
@@ -88,7 +90,7 @@ async def test_compute_job_metrics_counts_and_rate(make_client):
 
 async def test_compute_job_metrics_rate_none_when_nothing_finished(make_client):
     client = make_client()
-    client._call = AsyncMock(return_value={"@odata.count": 0})
+    client._call = AsyncMock(return_value={"value": []})
 
     m = await client.compute_job_metrics()
     assert m.total == 0
@@ -99,16 +101,16 @@ async def test_compute_job_metrics_rate_none_when_nothing_finished(make_client):
 
 async def test_compute_queue_metrics(make_client):
     client = make_client()
-    buckets = {"New": 3, "InProgress": 1, "Successful": 10, "Failed": 2, "Abandoned": 0}
 
     def fake_call(method, path, *, params=None, body=None, folder_id=None):
-        if path == "/odata/QueueDefinitions":
-            return {"value": [{"Id": 5}]}
-        flt = (params or {}).get("$filter", "")
-        for label, n in buckets.items():
-            if f"Status eq '{label}'" in flt:
-                return {"@odata.count": n}
-        return {"@odata.count": 0}
+        if "$apply" in (params or {}):
+            return {"value": [
+                {"Status": "New", "count": 3},
+                {"Status": "InProgress", "count": 1},
+                {"Status": "Successful", "count": 10},
+                {"Status": "Failed", "count": 2},
+            ]}
+        return {"value": [{"Id": 5}]}  # the QueueDefinitions lookup
 
     client._call = AsyncMock(side_effect=fake_call)
 
@@ -117,6 +119,8 @@ async def test_compute_queue_metrics(make_client):
     assert m.total == 16
     assert m.successful == 10
     assert m.success_rate_pct == 83.3  # 10 / (10 + 2)
+    # Definition lookup + one grouped count = 2 calls, not 1-per-status.
+    assert client._call.call_count == 2
 
 
 # ── Composite analytics ──────────────────────────────────────
@@ -177,12 +181,47 @@ async def test_query_jobs_builds_combined_filter(make_client):
     assert params["$filter"] == "State eq 'Running' and ReleaseName eq 'Invoices'"
 
 
-# ── License stubs ────────────────────────────────────────────
+# ── Resilience: retry / 401-refresh ──────────────────────────
 
-async def test_license_stubs_report_not_implemented(make_client):
-    client = make_client()
-    assert await client.get_license_stats() == {"status": "not_implemented"}
-    assert await client.get_runtime_licenses(robot_type="Unattended") == {"status": "not_implemented"}
+def _resp(status, *, json_body=None, headers=None):
+    """Build an httpx.Response standing in for a server reply."""
+    import httpx
+    return httpx.Response(status, json=json_body or {}, headers=headers or {}, request=httpx.Request("GET", "https://x/"))
+
+
+async def test_call_retries_on_429_then_succeeds(make_client, monkeypatch):
+    client = make_client(auth_strategy="cloud-pat", access_token="t", client_id=None, client_secret=None)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())  # don't actually wait
+
+    replies = [_resp(429, headers={"Retry-After": "1"}), _resp(200, json_body={"ok": True})]
+    client._http.request = AsyncMock(side_effect=replies)
+
+    result = await client._call("GET", "/odata/Jobs")
+    assert result == {"ok": True}
+    assert client._http.request.await_count == 2
+
+
+async def test_call_refreshes_token_once_on_401(make_client, monkeypatch):
+    client = make_client()  # cloud-oauth
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    client._oauth_handshake = AsyncMock(return_value=("fresh", time.time() + 1000))
+    client._token, client._token_expiry = "stale", time.time() + 1000
+
+    replies = [_resp(401), _resp(200, json_body={"ok": True})]
+    client._http.request = AsyncMock(side_effect=replies)
+
+    result = await client._call("GET", "/odata/Jobs")
+    assert result == {"ok": True}
+    client._oauth_handshake.assert_awaited()  # token was refreshed
+
+
+async def test_call_raises_after_exhausting_retries(make_client, monkeypatch):
+    client = make_client(auth_strategy="cloud-pat", access_token="t", client_id=None, client_secret=None)
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+    client._http.request = AsyncMock(return_value=_resp(503))
+
+    with pytest.raises(RuntimeError, match="503"):
+        await client._call("GET", "/odata/Jobs", max_retries=2)
 
 
 # ── Bug fixes / hardening ────────────────────────────────────

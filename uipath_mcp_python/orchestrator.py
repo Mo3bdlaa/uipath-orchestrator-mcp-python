@@ -7,6 +7,7 @@ provides typed helpers for every major Orchestrator endpoint.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any, Dict, List, Type, TypeVar
@@ -36,6 +37,9 @@ from .schemas import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+# HTTP statuses worth retrying: rate-limit + transient server errors.
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
 class Orchestrator:
@@ -141,22 +145,48 @@ class Orchestrator:
         params: Dict[str, Any] | None = None,
         body: Any = None,
         folder_id: int | None = None,
+        max_retries: int = 3,
     ) -> Any:
-        token = await self._acquire_token()
-        headers: Dict[str, str] = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+        """Make an authenticated request, refreshing on 401 and backing off on transient errors."""
         fid = folder_id if folder_id is not None else self._cfg.folder_id
-        if fid is not None:
-            headers["X-UIPATH-OrganizationUnitId"] = str(fid)
-
         url = f"{self._api_root.rstrip('/')}/{path.lstrip('/')}"
-        resp = await self._http.request(method, url, headers=headers, params=params, json=body)
 
-        if not resp.is_success:
+        attempt = 0
+        while True:
+            token = await self._acquire_token()
+            headers: Dict[str, str] = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            if fid is not None:
+                headers["X-UIPATH-OrganizationUnitId"] = str(fid)
+
+            resp = await self._http.request(method, url, headers=headers, params=params, json=body)
+            if resp.is_success:
+                return resp.json()
+
+            # Expired/invalid token: drop the cache and retry once with a fresh one.
+            if resp.status_code == 401 and attempt == 0 and self._cfg.auth_strategy != "cloud-pat":
+                self._token, self._token_expiry = None, 0.0
+                attempt += 1
+                continue
+
+            # Transient failures: exponential backoff (honouring Retry-After when present).
+            if resp.status_code in _RETRYABLE_STATUS and attempt < max_retries:
+                delay = self._retry_after_seconds(resp) or 2 ** attempt
+                await asyncio.sleep(delay)
+                attempt += 1
+                continue
+
             raise RuntimeError(f"Orchestrator {method} {path} → {resp.status_code}: {resp.text}")
-        return resp.json()
+
+    @staticmethod
+    def _retry_after_seconds(resp: httpx.Response) -> float | None:
+        """Parse a ``Retry-After`` header expressed as whole seconds, if present."""
+        raw = resp.headers.get("Retry-After")
+        if raw and raw.isdigit():
+            return float(raw)
+        return None
 
     async def _odata_list(
         self,
@@ -181,6 +211,19 @@ class Orchestrator:
     def _odata_str(value: str) -> str:
         """Escape a string literal for safe interpolation into an OData $filter."""
         return value.replace("'", "''")
+
+    async def _group_count(
+        self, path: str, field: str, *, flt: str | None = None, folder_id: int | None = None
+    ) -> Dict[str, int]:
+        """Count rows grouped by ``field`` in a single OData ``$apply`` round trip.
+
+        Returns a ``{field_value: count}`` map. Replaces the N-calls-per-bucket pattern.
+        """
+        apply = f"groupby(({field}),aggregate($count as count))"
+        if flt:
+            apply = f"filter({flt})/{apply}"
+        data = await self._call("GET", path, params={"$apply": apply}, folder_id=folder_id)
+        return {row[field]: row.get("count", 0) for row in data.get("value", []) if row.get(field) is not None}
 
     # ── Folders ─────────────────────────────────────────────
 
@@ -274,12 +317,11 @@ class Orchestrator:
             raise ValueError(f"Queue '{queue_name}' not found")
         qid = defs["value"][0]["Id"]
 
+        grouped = await self._group_count(
+            "/odata/QueueItems", "Status", flt=f"QueueDefinitionId eq {qid}", folder_id=folder_id
+        )
         buckets = {
-            label: await self._count(
-                "/odata/QueueItems",
-                flt=f"QueueDefinitionId eq {qid} and Status eq '{label}'",
-                folder_id=folder_id,
-            )
+            label: grouped.get(label, 0)
             for label in ("New", "InProgress", "Successful", "Failed", "Abandoned")
         }
 
@@ -347,8 +389,9 @@ class Orchestrator:
         )
 
     async def compute_job_metrics(self, *, folder_id: int | None = None) -> JobMetrics:
+        grouped = await self._group_count("/odata/Jobs", "State", folder_id=folder_id)
         counts = {
-            state: await self._count("/odata/Jobs", flt=f"State eq '{state}'", folder_id=folder_id)
+            state: grouped.get(state, 0)
             for state in ("Pending", "Running", "Successful", "Faulted", "Stopped")
         }
 
@@ -492,20 +535,6 @@ class Orchestrator:
             key = s.State or "Unknown"
             buckets[key] = buckets.get(key, 0) + 1
         return buckets
-
-    # ── License stubs ───────────────────────────────────────
-
-    async def get_consumption_license_stats(self, **_: Any) -> Dict[str, str]:
-        return {"status": "not_implemented"}
-
-    async def get_license_stats(self, **_: Any) -> Dict[str, str]:
-        return {"status": "not_implemented"}
-
-    async def get_runtime_licenses(self, **_: Any) -> Dict[str, str]:
-        return {"status": "not_implemented"}
-
-    async def get_named_user_licenses(self, **_: Any) -> Dict[str, str]:
-        return {"status": "not_implemented"}
 
     # ── Lifecycle ───────────────────────────────────────────
 

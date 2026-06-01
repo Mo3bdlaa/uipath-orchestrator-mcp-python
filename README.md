@@ -13,7 +13,7 @@ UiPath Orchestrator as a set of agent tools. Point Claude Desktop (or Cline, Con
 or a custom agent) at it and ask, in plain language, to start jobs, inspect failures,
 manage queues, and read audit logs — across Cloud, on-prem, and PAT deployments.
 
-It's a **typed async Python client** (29 tools, Pydantic models, three production auth
+It's a **typed async Python client** (25 tools, Pydantic models, three production auth
 strategies) wrapped as a **native MCP server** — not a REST wrapper, not a bespoke
 integration.
 
@@ -99,7 +99,7 @@ using the `env` block above.
 
 ## Tools exposed
 
-The server exposes **29 tools**, grouped by Orchestrator domain:
+The server exposes **25 tools**, grouped by Orchestrator domain:
 
 ### Folders & Infrastructure
 | Tool | Description |
@@ -154,17 +154,13 @@ The server exposes **29 tools**, grouped by Orchestrator domain:
 | `summarize_folder` | Build a health snapshot of a folder: job states, queue/robot counts. |
 | `get_dashboard` | High-level dashboard with aggregated metrics. |
 
-### Licensing
-| Tool | Description |
-|---|---|
-| `get_consumption_license_stats` | Consumption-based license usage statistics. |
-| `get_license_stats` | Tenant license usage statistics. |
-| `get_runtime_licenses` | Runtime license allocation by robot type. |
-| `get_named_user_licenses` | Named-user license allocation by robot type. |
-
 > The tool list above is generated from the docstrings in
 > [`uipath_mcp_python/server.py`](./uipath_mcp_python/server.py) — that file is the
 > source of truth as tools change.
+>
+> Tools are annotated with MCP hints (`readOnlyHint` / `destructiveHint`) so an
+> agent host can tell safe reads from state changes. Only `start_process`,
+> `enqueue_item`, and `cancel_job` mutate Orchestrator state.
 
 ## Resources (read-only endpoints)
 

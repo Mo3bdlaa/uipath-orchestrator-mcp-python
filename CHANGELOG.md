@@ -18,6 +18,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resource endpoints return clean, indented JSON instead of a Python list repr.
 
 ### Changed
+- **Agent safety:** every tool now carries MCP annotations (`readOnlyHint` /
+  `destructiveHint` / `idempotentHint`) so a host can distinguish safe reads
+  from state changes. Only `start_process`, `enqueue_item`, and `cancel_job`
+  are flagged as writes (`cancel_job` as destructive).
+- **Removed the four not-implemented license tools** (`get_license_stats`,
+  `get_runtime_licenses`, `get_consumption_license_stats`,
+  `get_named_user_licenses`). They returned `{"status": "not_implemented"}` and
+  only added noise to the agent's tool surface. Tool count: 29 → 25.
+- **Resilience:** the HTTP layer now refreshes the token once on `401` and
+  retries transient failures (`429`/`5xx`) with exponential backoff, honouring
+  `Retry-After` when present.
+- **Fewer round trips:** job and queue metrics use a single OData `$apply`
+  groupby aggregation instead of one count request per state/status.
+- Bumped the `mcp` floor to `>=1.8.0` for tool-annotation support.
 - Relicensed from a proprietary license to **MIT** to allow adoption.
 - Rewrote the README around the five questions a first-time user needs answered:
   what it is, why it exists, what the agent can do, how to install (Claude Desktop),
