@@ -43,6 +43,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   HTTP status, with oversized error bodies trimmed).
 - **Resource templates:** added `orchestrator://folders/{folder_id}/summary`
   and `orchestrator://queues/{queue_name}/metrics` for parameterised lookups.
+- **Observability:** retries, token refreshes, and give-ups are now logged via
+  the `uipath_mcp_python` logger (library-style — silent until the host app
+  attaches a handler / sets a level).
 - **Fewer round trips:** job and queue metrics use a single OData `$apply`
   groupby aggregation instead of one count request per state/status.
 - Bumped the `mcp` floor to `>=1.8.0` for tool-annotation support.

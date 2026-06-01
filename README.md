@@ -206,6 +206,9 @@ The client is built for unattended agent use:
   exponential backoff and jitter, honouring the `Retry-After` header when present.
 - **Timeouts and a bounded connection pool** are configured on the HTTP client;
   error bodies are trimmed before surfacing as a typed `OrchestratorError`.
+- **Observability:** retries, token refreshes, and give-ups are logged through
+  the `uipath_mcp_python` logger (silent by default — attach a handler / set a
+  level in your host app to see them).
 
 Optional tuning via environment variables:
 

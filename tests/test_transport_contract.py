@@ -78,6 +78,23 @@ async def test_real_retry_loop_recovers_from_429(monkeypatch):
     assert calls["n"] == 2  # one 429, then success
 
 
+async def test_retry_emits_warning_log(monkeypatch, caplog):
+    import logging
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr("asyncio.sleep", AsyncMock())
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503) if calls["n"] == 1 else httpx.Response(200, json={"value": []})
+
+    client = _client(handler)
+    with caplog.at_level(logging.WARNING, logger="uipath_mcp_python"):
+        await client._call("GET", "/odata/Jobs")
+    assert any("503" in r.message and "retry" in r.message for r in caplog.records)
+
+
 async def test_error_body_is_trimmed_and_typed():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, text="<html>" + "x" * 4000 + "</html>")

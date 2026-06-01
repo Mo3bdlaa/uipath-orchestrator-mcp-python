@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import time
 from typing import Any, Dict, List, Type, TypeVar
@@ -38,6 +39,10 @@ from .schemas import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+# Library-style logging: emit through a module logger and let the host app
+# configure handlers/levels. Silent by default (no handler attached here).
+log = logging.getLogger("uipath_mcp_python")
 
 # HTTP statuses worth retrying: rate-limit + transient server errors.
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -120,6 +125,7 @@ class Orchestrator:
             if self._token and time.time() < self._token_expiry - 300:
                 return self._token
 
+            log.debug("Acquiring %s token", self._cfg.auth_strategy)
             if self._cfg.auth_strategy == "cloud-oauth":
                 self._token, self._token_expiry = await self._oauth_handshake()
             elif self._cfg.auth_strategy == "on-prem":
@@ -193,9 +199,12 @@ class Orchestrator:
             except httpx.TransportError as exc:
                 # Connection reset, read/connect timeout, DNS failure, etc. — transient.
                 if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt + random.uniform(0, 0.5))
+                    delay = 2 ** attempt + random.uniform(0, 0.5)
+                    log.warning("Transport error on %s %s (%s); retrying in %.1fs", method, path, exc, delay)
+                    await asyncio.sleep(delay)
                     attempt += 1
                     continue
+                log.error("Transport error on %s %s after %d retries: %s", method, path, attempt, exc)
                 raise OrchestratorError(method, path, 0, f"transport error: {exc}") from exc
 
             if resp.is_success:
@@ -203,6 +212,7 @@ class Orchestrator:
 
             # Expired/invalid token: drop the cache and retry once with a fresh one.
             if resp.status_code == 401 and attempt == 0 and self._cfg.auth_strategy != "cloud-pat":
+                log.info("Got 401 on %s %s; refreshing token and retrying", method, path)
                 self._token, self._token_expiry = None, 0.0
                 attempt += 1
                 continue
@@ -212,10 +222,12 @@ class Orchestrator:
                 delay = self._retry_after_seconds(resp)
                 if delay is None:
                     delay = 2 ** attempt + random.uniform(0, 0.5)  # jitter avoids sync'd retries
+                log.warning("%s %s → %d; retry %d/%d in %.1fs", method, path, resp.status_code, attempt + 1, max_retries, delay)
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue
 
+            log.error("%s %s → %d (giving up)", method, path, resp.status_code)
             raise OrchestratorError(method, path, resp.status_code, self._trim(resp.text))
 
     @staticmethod
