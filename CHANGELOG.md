@@ -27,8 +27,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `get_named_user_licenses`). They returned `{"status": "not_implemented"}` and
   only added noise to the agent's tool surface. Tool count: 29 → 25.
 - **Resilience:** the HTTP layer now refreshes the token once on `401` and
-  retries transient failures (`429`/`5xx`) with exponential backoff, honouring
-  `Retry-After` when present.
+  retries transient failures (`429`/`5xx`) with exponential backoff plus jitter,
+  honouring `Retry-After` when present.
+- **Transport hardening:** explicit request timeout and a bounded connection
+  pool (tunable via `UIPATH_REQUEST_TIMEOUT` / `UIPATH_MAX_CONNECTIONS`), token
+  refresh serialised behind a lock so concurrent tool calls trigger a single
+  handshake, and failures raised as a typed `OrchestratorError` (carrying the
+  HTTP status, with oversized error bodies trimmed).
+- **Resource templates:** added `orchestrator://folders/{folder_id}/summary`
+  and `orchestrator://queues/{queue_name}/metrics` for parameterised lookups.
 - **Fewer round trips:** job and queue metrics use a single OData `$apply`
   groupby aggregation instead of one count request per state/status.
 - Bumped the `mcp` floor to `>=1.8.0` for tool-annotation support.

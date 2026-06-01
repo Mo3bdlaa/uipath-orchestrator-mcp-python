@@ -47,7 +47,25 @@ def build_settings() -> OrchestratorSettings:
         access_token=os.getenv("UIPATH_PAT"),
         folder_id=folder_id,
         skip_tls_verify=os.getenv("UIPATH_DISABLE_SSL_VERIFY") == "1",
+        **_optional_float("UIPATH_REQUEST_TIMEOUT", "request_timeout"),
+        **_optional_int("UIPATH_MAX_CONNECTIONS", "max_connections"),
     )
+
+
+def _optional_float(env: str, field: str) -> dict:
+    raw = os.getenv(env)
+    try:
+        return {field: float(raw)} if raw else {}
+    except ValueError:
+        raise EnvironmentError(f"{env} must be a number, got {raw!r}")
+
+
+def _optional_int(env: str, field: str) -> dict:
+    raw = os.getenv(env)
+    try:
+        return {field: int(raw)} if raw else {}
+    except ValueError:
+        raise EnvironmentError(f"{env} must be an integer, got {raw!r}")
 
 
 def _require(*names: str) -> None:

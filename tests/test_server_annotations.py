@@ -51,3 +51,10 @@ async def test_read_tools_are_readonly():
         if name in WRITE_TOOLS:
             continue
         assert tool.annotations is not None and tool.annotations.readOnlyHint is True, name
+
+
+async def test_parameterised_resource_templates_registered():
+    templates = await server.mcp.list_resource_templates()
+    uris = {t.uriTemplate for t in templates}
+    assert "orchestrator://folders/{folder_id}/summary" in uris
+    assert "orchestrator://queues/{queue_name}/metrics" in uris

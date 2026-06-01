@@ -335,6 +335,22 @@ async def res_schedules() -> str:
     return _json([s.model_dump(mode="json") for s in schedules])
 
 
+# ── parameterised resource templates ────────────────────────
+
+@mcp.resource("orchestrator://folders/{folder_id}/summary")
+async def res_folder_summary(folder_id: str) -> str:
+    """Aggregated summary (robots, queues, releases, job metrics) for one folder."""
+    summary = await client.summarize_folder(int(folder_id))
+    return _json(summary.model_dump(mode="json"))
+
+
+@mcp.resource("orchestrator://queues/{queue_name}/metrics")
+async def res_queue_metrics(queue_name: str) -> str:
+    """Live item-status breakdown and success rate for a single queue."""
+    metrics = await client.compute_queue_metrics(queue_name)
+    return _json(metrics.model_dump(mode="json"))
+
+
 # ── entry point ─────────────────────────────────────────────
 
 def main() -> None:

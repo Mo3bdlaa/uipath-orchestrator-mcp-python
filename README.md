@@ -177,6 +177,34 @@ The server exposes **25 tools**, grouped by Orchestrator domain:
 | `orchestrator://assets` | Stored assets |
 | `orchestrator://schedules` | Configured schedules |
 
+### Parameterised resource templates
+
+| URI template | Description |
+|---|---|
+| `orchestrator://folders/{folder_id}/summary` | Robots, queues, releases & job metrics for one folder |
+| `orchestrator://queues/{queue_name}/metrics` | Live item-status breakdown & success rate for a queue |
+
+## Reliability & transport
+
+The client is built for unattended agent use:
+
+- **Token refresh** is serialised behind a lock and reused with a 5-minute
+  buffer, so concurrent tool calls trigger a single handshake. A `401` triggers
+  one transparent refresh-and-retry.
+- **Transient failures** (`429`, `5xx`) are retried with exponential backoff and
+  jitter, honouring the `Retry-After` header when present.
+- **Timeouts and a bounded connection pool** are configured on the HTTP client;
+  error bodies are trimmed before surfacing as a typed `OrchestratorError`.
+
+Optional tuning via environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `UIPATH_REQUEST_TIMEOUT` | `30` | Per-request timeout (seconds) |
+| `UIPATH_MAX_CONNECTIONS` | `20` | Max simultaneous HTTP connections |
+| `UIPATH_FOLDER_ID` | — | Default Organizational Unit ID |
+| `UIPATH_DISABLE_SSL_VERIFY` | `0` | Set `1` to skip TLS verification (on-prem self-signed) |
+
 ## Project structure
 
 ```

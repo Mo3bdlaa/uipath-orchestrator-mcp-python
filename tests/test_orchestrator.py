@@ -10,7 +10,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from uipath_mcp_python.schemas import Job, Session
+from uipath_mcp_python.orchestrator import Orchestrator
+from uipath_mcp_python.schemas import Job, OrchestratorSettings, Session
 
 
 # ── URL resolution ───────────────────────────────────────────
@@ -222,6 +223,46 @@ async def test_call_raises_after_exhausting_retries(make_client, monkeypatch):
 
     with pytest.raises(RuntimeError, match="503"):
         await client._call("GET", "/odata/Jobs", max_retries=2)
+
+
+async def test_orchestrator_error_carries_status_and_trims_body(make_client):
+    from uipath_mcp_python.orchestrator import OrchestratorError, _MAX_ERROR_BODY
+
+    client = make_client(auth_strategy="cloud-pat", access_token="t", client_id=None, client_secret=None)
+    huge = "<html>" + "x" * 5000 + "</html>"
+    client._http.request = AsyncMock(return_value=_resp(400, headers={"content-type": "text/html"}))
+    client._http.request.return_value._content = huge.encode()
+
+    with pytest.raises(OrchestratorError) as exc:
+        await client._call("GET", "/odata/Jobs")
+    assert exc.value.status_code == 400
+    assert len(str(exc.value)) < _MAX_ERROR_BODY + 200  # body was clipped
+    assert "truncated" in str(exc.value)
+
+
+async def test_concurrent_calls_trigger_single_handshake(make_client):
+    import asyncio as _asyncio
+
+    client = make_client()  # cloud-oauth
+    handshake = AsyncMock(return_value=("tok", time.time() + 1000))
+    client._oauth_handshake = handshake
+    client._http.request = AsyncMock(return_value=_resp(200, json_body={"value": []}))
+
+    await _asyncio.gather(*(client._call("GET", "/odata/Jobs") for _ in range(8)))
+    handshake.assert_awaited_once()  # lock collapses the stampede into one refresh
+
+
+def test_transport_timeout_and_pool_are_configured():
+    settings = OrchestratorSettings(
+        auth_strategy="cloud-pat", base_url="https://x/acme/Default/", access_token="t",
+        request_timeout=12.0, max_connections=7,
+    )
+    client = Orchestrator(settings)
+    try:
+        assert client._http.timeout.read == 12.0
+        assert client._http.timeout.connect == 10.0  # capped at 10s
+    finally:
+        client._http._transport = None  # type: ignore[attr-defined]
 
 
 # ── Bug fixes / hardening ────────────────────────────────────

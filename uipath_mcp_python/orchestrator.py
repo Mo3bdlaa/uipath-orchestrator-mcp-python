@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import time
 from typing import Any, Dict, List, Type, TypeVar
 from urllib.parse import urlparse
@@ -41,6 +42,20 @@ T = TypeVar("T", bound=BaseModel)
 # HTTP statuses worth retrying: rate-limit + transient server errors.
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
+# Cap how much of an error body we echo back — Orchestrator can return large
+# HTML error pages that would otherwise flood the agent's context.
+_MAX_ERROR_BODY = 500
+
+
+class OrchestratorError(RuntimeError):
+    """An Orchestrator request failed. Carries the HTTP status for callers/agents."""
+
+    def __init__(self, method: str, path: str, status_code: int, detail: str) -> None:
+        self.status_code = status_code
+        self.method = method
+        self.path = path
+        super().__init__(f"Orchestrator {method} {path} → {status_code}: {detail}")
+
 
 class Orchestrator:
     """Async client that communicates with a single UiPath Orchestrator tenant."""
@@ -49,7 +64,14 @@ class Orchestrator:
         self._cfg = settings
         self._token: str | None = None
         self._token_expiry: float = 0.0
-        self._http = httpx.AsyncClient(verify=not settings.skip_tls_verify)
+        # Serialises token refresh so concurrent tool calls trigger one handshake,
+        # not a stampede against the identity endpoint.
+        self._token_lock = asyncio.Lock()
+        self._http = httpx.AsyncClient(
+            verify=not settings.skip_tls_verify,
+            timeout=httpx.Timeout(settings.request_timeout, connect=min(10.0, settings.request_timeout)),
+            limits=httpx.Limits(max_connections=settings.max_connections),
+        )
         self._api_root = self._resolve_api_root()
 
     # ── URL resolution ──────────────────────────────────────
@@ -93,14 +115,19 @@ class Orchestrator:
         if self._token and time.time() < self._token_expiry - 300:
             return self._token
 
-        if self._cfg.auth_strategy == "cloud-oauth":
-            self._token, self._token_expiry = await self._oauth_handshake()
-        elif self._cfg.auth_strategy == "on-prem":
-            self._token, self._token_expiry = await self._onprem_handshake()
-        else:
-            raise RuntimeError(f"Unsupported auth strategy: {self._cfg.auth_strategy}")
+        async with self._token_lock:
+            # Re-check under the lock: another task may have refreshed while we waited.
+            if self._token and time.time() < self._token_expiry - 300:
+                return self._token
 
-        return self._token
+            if self._cfg.auth_strategy == "cloud-oauth":
+                self._token, self._token_expiry = await self._oauth_handshake()
+            elif self._cfg.auth_strategy == "on-prem":
+                self._token, self._token_expiry = await self._onprem_handshake()
+            else:
+                raise RuntimeError(f"Unsupported auth strategy: {self._cfg.auth_strategy}")
+
+            return self._token
 
     async def _oauth_handshake(self) -> tuple[str, float]:
         resp = await self._http.post(
@@ -171,14 +198,16 @@ class Orchestrator:
                 attempt += 1
                 continue
 
-            # Transient failures: exponential backoff (honouring Retry-After when present).
+            # Transient failures: exponential backoff with jitter (Retry-After wins).
             if resp.status_code in _RETRYABLE_STATUS and attempt < max_retries:
-                delay = self._retry_after_seconds(resp) or 2 ** attempt
+                delay = self._retry_after_seconds(resp)
+                if delay is None:
+                    delay = 2 ** attempt + random.uniform(0, 0.5)  # jitter avoids sync'd retries
                 await asyncio.sleep(delay)
                 attempt += 1
                 continue
 
-            raise RuntimeError(f"Orchestrator {method} {path} → {resp.status_code}: {resp.text}")
+            raise OrchestratorError(method, path, resp.status_code, self._trim(resp.text))
 
     @staticmethod
     def _retry_after_seconds(resp: httpx.Response) -> float | None:
@@ -187,6 +216,12 @@ class Orchestrator:
         if raw and raw.isdigit():
             return float(raw)
         return None
+
+    @staticmethod
+    def _trim(text: str) -> str:
+        """Clip an error body so large HTML pages don't flood the response."""
+        text = (text or "").strip()
+        return text if len(text) <= _MAX_ERROR_BODY else text[:_MAX_ERROR_BODY] + "… (truncated)"
 
     async def _odata_list(
         self,

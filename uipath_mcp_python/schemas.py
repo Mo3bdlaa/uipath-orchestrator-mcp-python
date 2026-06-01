@@ -40,6 +40,14 @@ class OrchestratorSettings(BaseModel):
     folder_id: Optional[int] = Field(None, description="Default Organizational Unit ID")
     skip_tls_verify: bool = Field(False, description="Bypass TLS certificate checks")
 
+    # transport tuning
+    request_timeout: float = Field(
+        30.0, gt=0, description="Per-request timeout in seconds for Orchestrator calls"
+    )
+    max_connections: int = Field(
+        20, gt=0, description="Maximum simultaneous HTTP connections in the pool"
+    )
+
 
 class OAuthTokenPayload(BaseModel):
     """Token response from the UiPath Identity Server."""
