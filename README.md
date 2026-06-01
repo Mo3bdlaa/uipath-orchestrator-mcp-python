@@ -221,10 +221,15 @@ list-then-schedule flow and an on-prem deployment.
 ## Development
 
 ```bash
-pip install -e ".[test]"
-pytest          # unit tests — no live Orchestrator required
+pip install -e ".[dev]"
+pytest                              # unit tests — no live Orchestrator required
 ruff check uipath_mcp_python/ tests/
+mypy                                # static type check (config in pyproject.toml)
 ```
+
+The package ships a [`py.typed`](https://peps.python.org/pep-0561/) marker, so
+downstream projects get full type information when importing
+`uipath_mcp_python`.
 
 ## License
 

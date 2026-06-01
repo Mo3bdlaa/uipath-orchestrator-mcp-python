@@ -42,6 +42,7 @@ uipath-mcp = "uipath_mcp_python.server:main"
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff", "mypy>=1.8"]
 
 [project.urls]
 Homepage = "https://mohammedshaker.com"
@@ -50,6 +51,16 @@ Repository = "https://github.com/Mo3bdlaa/uipath-orchestrator-mcp-python"
 [tool.setuptools]
 packages = ["uipath_mcp_python"]
 
+[tool.setuptools.package-data]
+uipath_mcp_python = ["py.typed"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+files = ["uipath_mcp_python"]

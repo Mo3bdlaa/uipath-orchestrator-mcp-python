@@ -54,6 +54,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `tests/` — unit tests for settings validation, Pydantic schemas, URL
   resolution, token caching, and computed metrics (no live Orchestrator needed).
 - `.github/workflows/ci.yml` running ruff and pytest across Python 3.10–3.12.
+- Static type checking: a `[tool.mypy]` config (the CI mypy step activates
+  automatically once it is present) and a PEP 561 `py.typed` marker so the
+  package exports its type information. The codebase is mypy-clean.
+- A `dev` extra (`pip install -e ".[dev]"`) bundling pytest, ruff, and mypy.
 - `.github/MAINTAINER_TODO.md` listing the manual GitHub UI settings (topics,
   description, website).
 - `CHANGELOG.md` (this file).

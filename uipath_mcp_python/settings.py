@@ -6,8 +6,11 @@ variables are set for the chosen authentication strategy.
 """
 
 import os
+from typing import cast, get_args
+
 from dotenv import load_dotenv
-from .schemas import OrchestratorSettings
+
+from .schemas import AuthStrategy, OrchestratorSettings
 
 
 def build_settings() -> OrchestratorSettings:
@@ -30,14 +33,16 @@ def build_settings() -> OrchestratorSettings:
     else:
         raise ValueError(
             f"UIPATH_AUTH_TYPE='{strategy}' is not recognised. "
-            "Choose from: on-prem, cloud-oauth, cloud-pat"
+            f"Choose from: {', '.join(get_args(AuthStrategy))}"
         )
+    # Validated above, so the str safely narrows to the AuthStrategy literal.
+    auth_strategy = cast(AuthStrategy, strategy)
 
     fid_raw = os.getenv("UIPATH_FOLDER_ID")
     folder_id = int(fid_raw) if fid_raw and fid_raw.isdigit() else None
 
     return OrchestratorSettings(
-        auth_strategy=strategy,
+        auth_strategy=auth_strategy,
         base_url=base_url,
         tenant=os.getenv("UIPATH_TENANT_NAME", "Default"),
         client_id=os.getenv("UIPATH_CLIENT_ID"),
